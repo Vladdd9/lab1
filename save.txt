@@ -1,0 +1,11 @@
+Pipe:
+uchastok1
+10
+30
+0
+working
+KS:
+KS
+12
+7
+type
