@@ -3,80 +3,414 @@
 #include <iostream>
 #include <string>
 #include <fstream>
+#include <unordered_map>
+#include <vector>
+#include <limits>
+#include <algorithm>
+#include "Pipe.h"
+#include "KS.h"
+#include "Logger.h"
+
 using namespace std;
 
-struct Pipe {
-    string name;
-    float length;
-    int diametr;
-    bool repair;
-    string condition;
-};
+unordered_map<int, Pipe> pipes;
+unordered_map<int, KS> stations;
+int nextPipeId = 1;
+int nextKSId = 1;
+Logger logger;
 
-struct KS {
-    string name;
-    int workshop_count;
-    int workshop_working;
-    string type;
-};
-
-void saveToFile(const Pipe& t, const KS& k, const string& filename) {
+void saveToFile(const string& filename) {
     ofstream file(filename);
     if (file.is_open()) {
-        file << "Pipe:" << endl;
-        file << t.name << endl;
-        file << t.length << endl;
-        file << t.diametr << endl;
-        file << t.repair << endl;
-        file << t.condition << endl;
+        file << "Pipes:" << endl;
+        file << pipes.size() << endl;
+        for (const auto& pair : pipes) {
+            const Pipe& t = pair.second;
+            file << t.getId() << endl;
+            file << t.getName() << endl;
+            file << t.getLength() << endl;
+            file << t.getDiameter() << endl;
+            file << t.isInRepair() << endl;
+            file << t.getCondition() << endl;
+        }
 
         file << "KS:" << endl;
-        file << k.name << endl;
-        file << k.workshop_count << endl;
-        file << k.workshop_working << endl;
-        file << k.type << endl;
+        file << stations.size() << endl;
+        for (const auto& pair : stations) {
+            const KS& k = pair.second;
+            file << k.getId() << endl;
+            file << k.getName() << endl;
+            file << k.getWorkshopCount() << endl;
+            file << k.getWorkshopWorking() << endl;
+            file << k.getType() << endl;
+        }
 
         file.close();
-        cout << "Data saved to " << filename << " successfully!" << endl;
+        string msg = "Data saved to " + filename + " successfully!";
+        logger.log(msg);
     }
     else {
-        cout << "Error: Unable to open file for writing!" << endl;
+        logger.log("Error: Unable to open file for writing!");
     }
 }
 
-void loadFromFile(Pipe& t, KS& k, const string& filename) {
+void loadFromFile(const string& filename) {
     ifstream file(filename);
     if (file.is_open()) {
+        pipes.clear();
+        stations.clear();
         string line;
+        int count;
 
         getline(file, line);
-
-        getline(file, t.name);
-        file >> t.length;
-        file >> t.diametr;
-        file >> t.repair;
+        file >> count;
         file.ignore();
-        getline(file, t.condition);
+
+        for (int i = 0; i < count; i++) {
+            int id;
+            string name;
+            float length;
+            int diameter;
+            bool repair;
+            string condition;
+
+            file >> id;
+            file.ignore();
+            getline(file, name);
+            file >> length;
+            file >> diameter;
+            file >> repair;
+            file.ignore();
+            getline(file, condition);
+
+            Pipe t(id, name, length, diameter);
+            if (repair) {
+                t.setRepair(true);
+            }
+            pipes[id] = t;
+
+            if (id >= nextPipeId) {
+                nextPipeId = id + 1;
+            }
+        }
 
         getline(file, line);
-
-        getline(file, k.name);
-        file >> k.workshop_count;
-        file >> k.workshop_working;
+        file >> count;
         file.ignore();
-        getline(file, k.type);
+
+        for (int i = 0; i < count; i++) {
+            int id;
+            string name;
+            int workshop_count;
+            int workshop_working;
+            string type;
+
+            file >> id;
+            file.ignore();
+            getline(file, name);
+            file >> workshop_count;
+            file >> workshop_working;
+            file.ignore();
+            getline(file, type);
+
+            stations[id] = KS(id, name, type, workshop_count, workshop_working);
+
+            if (id >= nextKSId) {
+                nextKSId = id + 1;
+            }
+        }
 
         file.close();
-        cout << "Data loaded from " << filename << " successfully!" << endl;
+        string msg = "Data loaded from " + filename + " successfully!";
+        logger.log(msg);
     }
     else {
-        cout << "Error: Unable to open file for reading!" << endl;
+        logger.log("Error: Unable to open file for reading!");
+    }
+}
+
+void displayAllPipes() {
+    if (pipes.empty()) {
+        logger.log("No pipes available.");
+        return;
+    }
+
+    cout << "Pipes:\n";
+    for (const auto& pair : pipes) {
+        cout << pair.second << "\n";
+    }
+}
+
+void displayAllStations() {
+    if (stations.empty()) {
+        logger.log("No compressor stations available.");
+        return;
+    }
+
+    cout << "Compressor Stations:\n";
+    for (const auto& pair : stations) {
+        cout << pair.second << "\n";
+    }
+}
+
+vector<int> findPipesByName(const string& name) {
+    vector<int> result;
+    for (const auto& pair : pipes) {
+        if (pair.second.getName().find(name) != string::npos) {
+            result.push_back(pair.first);
+        }
+    }
+    return result;
+}
+
+vector<int> findPipesByRepairStatus(bool inRepair) {
+    vector<int> result;
+    for (const auto& pair : pipes) {
+        if (pair.second.isInRepair() == inRepair) {
+            result.push_back(pair.first);
+        }
+    }
+    return result;
+}
+
+vector<int> findStationsByName(const string& name) {
+    vector<int> result;
+    for (const auto& pair : stations) {
+        if (pair.second.getName().find(name) != string::npos) {
+            result.push_back(pair.first);
+        }
+    }
+    return result;
+}
+
+vector<int> findStationsByPercentNotWorking(double minPercent, double maxPercent = 100.0) {
+    vector<int> result;
+    for (const auto& pair : stations) {
+        double percent = pair.second.getPercentNotWorking();
+        if (percent >= minPercent && percent <= maxPercent) {
+            result.push_back(pair.first);
+        }
+    }
+    return result;
+}
+
+void batchEditPipes() {
+    if (pipes.empty()) {
+        logger.log("No pipes to edit.");
+        return;
+    }
+
+    cout << "Search pipes for batch editing:\n";
+    cout << "1 - By name\n";
+    cout << "2 - By repair status\n";
+    cout << "3 - All pipes\n";
+
+    int searchOption;
+    while (!(cin >> searchOption) || searchOption < 1 || searchOption > 3) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid option. Please enter 1-3: ";
+    }
+
+    vector<int> pipeIds;
+
+    if (searchOption == 1) {
+        cout << "Enter pipe name to search: ";
+        string name;
+        cin >> name;
+        pipeIds = findPipesByName(name);
+        logger.log("Search pipes by name: " + name);
+    }
+    else if (searchOption == 2) {
+        cout << "Search pipes in repair? (y/n): ";
+        char ans;
+        cin >> ans;
+        bool inRepair = (ans == 'y' || ans == 'Y');
+        pipeIds = findPipesByRepairStatus(inRepair);
+        logger.log("Search pipes by repair status: " + string(inRepair ? "in repair" : "working"));
+    }
+    else {
+        for (const auto& pair : pipes) {
+            pipeIds.push_back(pair.first);
+        }
+        logger.log("Selected all pipes for batch editing");
+    }
+
+    if (pipeIds.empty()) {
+        logger.log("No pipes found matching the criteria.");
+        return;
+    }
+
+    cout << "Found " << pipeIds.size() << " pipes:\n";
+    for (int id : pipeIds) {
+        cout << pipes[id] << "\n";
+    }
+
+    cout << "Edit all found pipes? (y/n): ";
+    char editAll;
+    cin >> editAll;
+
+    vector<int> pipesToEdit;
+    if (editAll == 'y' || editAll == 'Y') {
+        pipesToEdit = pipeIds;
+        logger.log("User selected to edit all found pipes");
+    }
+    else {
+        cout << "Enter pipe IDs to edit (one per line, 0 to finish):\n";
+        int id;
+        while (cin >> id && id != 0) {
+            if (find(pipeIds.begin(), pipeIds.end(), id) != pipeIds.end()) {
+                pipesToEdit.push_back(id);
+            }
+            else {
+                cout << "ID " << id << " not in found pipes. Try again.\n";
+            }
+        }
+        logger.log("User selected specific pipes for editing");
+    }
+
+    if (pipesToEdit.empty()) {
+        logger.log("No pipes selected for editing.");
+        return;
+    }
+
+    cout << "Choose editing option:\n";
+    cout << "1 - Change repair status\n";
+    cout << "2 - Change name\n";
+
+    int editOption;
+    while (!(cin >> editOption) || editOption < 1 || editOption > 2) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid option. Please enter 1-2: ";
+    }
+
+    if (editOption == 1) {
+        cout << "Set repair status (y - in repair, n - working): ";
+        char ans;
+        cin >> ans;
+        bool inRepair = (ans == 'y' || ans == 'Y');
+
+        for (int id : pipesToEdit) {
+            pipes[id].setRepair(inRepair);
+        }
+
+        string status = inRepair ? "repair" : "working";
+        logger.log("Batch updated " + to_string(pipesToEdit.size()) + " pipes to status: " + status);
+    }
+    else {
+        cout << "Enter new name: ";
+        string newName;
+        cin >> newName;
+
+        for (int id : pipesToEdit) {
+            pipes[id].setName(newName);
+        }
+
+        logger.log("Batch updated " + to_string(pipesToEdit.size()) + " pipes with new name: " + newName);
+    }
+
+    cout << "Successfully updated " << pipesToEdit.size() << " pipes.\n";
+}
+
+void searchObjects() {
+    cout << "Search objects:\n";
+    cout << "1 - Search pipes\n";
+    cout << "2 - Search compressor stations\n";
+
+    int option;
+    while (!(cin >> option) || option < 1 || option > 2) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid option. Please enter 1-2: ";
+    }
+
+    if (option == 1) {
+        cout << "Search pipes by:\n";
+        cout << "1 - Name\n";
+        cout << "2 - Repair status\n";
+
+        int searchType;
+        while (!(cin >> searchType) || searchType < 1 || searchType > 2) {
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Invalid option. Please enter 1-2: ";
+        }
+
+        vector<int> foundPipes;
+
+        if (searchType == 1) {
+            cout << "Enter pipe name to search: ";
+            string name;
+            cin >> name;
+            foundPipes = findPipesByName(name);
+            logger.log("Search pipes by name: " + name);
+        }
+        else {
+            cout << "Search pipes in repair? (y/n): ";
+            char ans;
+            cin >> ans;
+            bool inRepair = (ans == 'y' || ans == 'Y');
+            foundPipes = findPipesByRepairStatus(inRepair);
+            logger.log("Search pipes by repair status: " + string(inRepair ? "in repair" : "working"));
+        }
+
+        if (foundPipes.empty()) {
+            cout << "No pipes found.\n";
+        }
+        else {
+            cout << "Found " << foundPipes.size() << " pipes:\n";
+            for (int id : foundPipes) {
+                cout << pipes[id] << "\n";
+            }
+        }
+    }
+    else {
+        cout << "Search compressor stations by:\n";
+        cout << "1 - Name\n";
+        cout << "2 - Percent of not working workshops\n";
+
+        int searchType;
+        while (!(cin >> searchType) || searchType < 1 || searchType > 2) {
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Invalid option. Please enter 1-2: ";
+        }
+
+        vector<int> foundStations;
+
+        if (searchType == 1) {
+            cout << "Enter station name to search: ";
+            string name;
+            cin >> name;
+            foundStations = findStationsByName(name);
+            logger.log("Search stations by name: " + name);
+        }
+        else {
+            cout << "Enter minimum percent of not working workshops: ";
+            double minPercent;
+            while (!(cin >> minPercent) || minPercent < 0 || minPercent > 100) {
+                cin.clear();
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "Invalid input. Please enter a number between 0 and 100: ";
+            }
+            foundStations = findStationsByPercentNotWorking(minPercent);
+            logger.log("Search stations by percent not working: " + to_string(minPercent) + "%");
+        }
+
+        if (foundStations.empty()) {
+            cout << "No compressor stations found.\n";
+        }
+        else {
+            cout << "Found " << foundStations.size() << " stations:\n";
+            for (int id : foundStations) {
+                cout << stations[id] << "\n";
+            }
+        }
     }
 }
 
 void Menu() {
-    Pipe t = { "", 0.0f, 0, false, "unknown" };
-    KS k = { "", 0, 0, "" };
     int option;
     string filename;
 
@@ -87,8 +421,10 @@ void Menu() {
         cout << "3 - view all objects \n";
         cout << "4 - edit pipe \n";
         cout << "5 - edit compressor station \n";
-        cout << "6 - save \n";
-        cout << "7 - load \n";
+        cout << "6 - search objects \n";
+        cout << "7 - batch edit pipes \n";
+        cout << "8 - save \n";
+        cout << "9 - load \n";
         cout << "0 - exit \n";
 
         while (!(cin >> option)) {
@@ -98,79 +434,105 @@ void Menu() {
         }
         cout << "\n";
 
+        logger.log("User selected option: " + to_string(option));
+
         switch (option) {
         case 0:
+            logger.log("Exiting program. Goodbye!");
             cout << "Exiting program. Goodbye!" << endl;
             return;
 
-        case 1:
+        case 1: {
+            string name;
+            float length;
+            int diameter;
+
             cout << "Insert pipe name: ";
-            cin >> t.name;
+            cin >> name;
 
             cout << "Insert length: ";
-            while (!(cin >> t.length) || t.length <= 0) {
+            while (!(cin >> length) || length <= 0) {
                 cin.clear();
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
                 cout << "Invalid input. Please enter a positive number: ";
             }
 
-            cout << "Insert diametr: ";
-            while (!(cin >> t.diametr) || t.diametr <= 0) {
+            cout << "Insert diameter: ";
+            while (!(cin >> diameter) || diameter <= 0) {
                 cin.clear();
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
                 cout << "Invalid input. Please enter a positive integer: ";
             }
 
-            t.condition = "working";
-            t.repair = false;
-            cout << "\n";
-            break;
+            Pipe t(nextPipeId++, name, length, diameter);
+            pipes[t.getId()] = t;
 
-        case 2:
+            string msg = "Pipe added with ID: " + to_string(t.getId());
+            logger.log(msg);
+            cout << msg << "\n\n";
+            break;
+        }
+
+        case 2: {
+            string name, type;
+            int workshop_count, workshop_working;
+
             cout << "Insert compressor station name: ";
-            cin >> k.name;
+            cin >> name;
 
             cout << "Insert station type: ";
-            cin >> k.type;
+            cin >> type;
 
             cout << "Insert number of workshops: ";
-            while (!(cin >> k.workshop_count) || k.workshop_count <= 0) {
+            while (!(cin >> workshop_count) || workshop_count <= 0) {
                 cin.clear();
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
                 cout << "Invalid input. Please enter a positive integer: ";
             }
 
             cout << "Insert number of workshops which actually work: ";
-            while (!(cin >> k.workshop_working) || k.workshop_working < 0 || k.workshop_working > k.workshop_count) {
+            while (!(cin >> workshop_working) || workshop_working < 0 || workshop_working > workshop_count) {
                 cin.clear();
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
-                cout << "Invalid input. Please enter a number between 0 and " << k.workshop_count << ": ";
+                cout << "Invalid input. Please enter a number between 0 and " << workshop_count << ": ";
             }
-            cout << "\n";
+
+            KS k(nextKSId++, name, type, workshop_count, workshop_working);
+            stations[k.getId()] = k;
+
+            string msg = "Compressor station added with ID: " + to_string(k.getId());
+            logger.log(msg);
+            cout << msg << "\n\n";
             break;
+        }
 
         case 3:
-            if (t.name.empty() && k.name.empty()) {
+            if (pipes.empty() && stations.empty()) {
+                logger.log("No objects to display");
                 cout << "No objects to display. Please add pipes or compressor stations first.\n\n";
             }
             else {
-                if (!t.name.empty()) {
-                    cout << "Pipe: \nname: " << t.name << " length: " << t.length
-                        << " diametr: " << t.diametr << " condition: " << t.condition << "\n";
-                }
-                if (!k.name.empty()) {
-                    cout << "Compressor station: \nname: " << k.name << " type: " << k.type
-                        << " total workshops: " << k.workshop_count
-                        << " workshops at work: " << k.workshop_working << "\n";
-                }
+                displayAllPipes();
+                cout << "\n";
+                displayAllStations();
                 cout << "\n";
             }
             break;
 
         case 4:
-            if (t.name.empty()) {
-                cout << "No pipe to edit. Please add a pipe first.\n\n";
+            if (pipes.empty()) {
+                logger.log("No pipes to edit");
+                cout << "No pipes to edit. Please add a pipe first.\n\n";
                 break;
+            }
+
+            displayAllPipes();
+            cout << "Enter pipe ID to edit: ";
+            int pipeId;
+            while (!(cin >> pipeId) || pipes.find(pipeId) == pipes.end()) {
+                cin.clear();
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "Invalid ID. Please enter a valid pipe ID: ";
             }
 
             cout << "Is pipe in repair? (y/n): ";
@@ -180,23 +542,34 @@ void Menu() {
                 cout << "Type y or n: ";
                 cin >> ans;
             }
+
             if (ans == 'y') {
-                t.repair = true;
-                t.condition = "repair";
+                pipes[pipeId].setRepair(true);
+                logger.log("Pipe " + to_string(pipeId) + " marked as in repair");
                 cout << "Pipe marked as in repair.\n";
             }
             else {
-                t.repair = false;
-                t.condition = "working";
+                pipes[pipeId].setRepair(false);
+                logger.log("Pipe " + to_string(pipeId) + " marked as working");
                 cout << "Pipe marked as working.\n";
             }
             cout << "\n";
             break;
 
         case 5:
-            if (k.name.empty()) {
-                cout << "No compressor station to edit. Please add a compressor station first.\n\n";
+            if (stations.empty()) {
+                logger.log("No compressor stations to edit");
+                cout << "No compressor stations to edit. Please add a compressor station first.\n\n";
                 break;
+            }
+
+            displayAllStations();
+            cout << "Enter compressor station ID to edit: ";
+            int ksId;
+            while (!(cin >> ksId) || stations.find(ksId) == stations.end()) {
+                cin.clear();
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "Invalid ID. Please enter a valid station ID: ";
             }
 
             cout << "Choose action (1 - put workshops into operation, 2 - put workshops out of operation): ";
@@ -210,50 +583,64 @@ void Menu() {
             if (action == 1) {
                 cout << "Set a number of workshops to put into operation: ";
                 int num;
-                while (!(cin >> num) || num <= 0 || num + k.workshop_working > k.workshop_count) {
+                while (!(cin >> num) || num <= 0 || num + stations[ksId].getWorkshopWorking() > stations[ksId].getWorkshopCount()) {
                     cin.clear();
                     cin.ignore(numeric_limits<streamsize>::max(), '\n');
                     cout << "Unacceptable number. Please enter a number between 1 and "
-                        << k.workshop_count - k.workshop_working << ": ";
+                        << stations[ksId].getWorkshopCount() - stations[ksId].getWorkshopWorking() << ": ";
                 }
-                k.workshop_working += num;
-                cout << num << " workshops put into operation. Total working: " << k.workshop_working << "\n";
+                stations[ksId].setWorkshopWorking(stations[ksId].getWorkshopWorking() + num);
+                logger.log("Station " + to_string(ksId) + ": " + to_string(num) + " workshops put into operation");
+                cout << num << " workshops put into operation. Total working: " << stations[ksId].getWorkshopWorking() << "\n";
             }
             else {
                 cout << "Set a number of workshops to put out of operation: ";
                 int num;
-                while (!(cin >> num) || num <= 0 || k.workshop_working - num < 0) {
+                while (!(cin >> num) || num <= 0 || stations[ksId].getWorkshopWorking() - num < 0) {
                     cin.clear();
                     cin.ignore(numeric_limits<streamsize>::max(), '\n');
                     cout << "Unacceptable number. Please enter a number between 1 and "
-                        << k.workshop_working << ": ";
+                        << stations[ksId].getWorkshopWorking() << ": ";
                 }
-                k.workshop_working -= num;
-                cout << num << " workshops put out of operation. Total working: " << k.workshop_working << "\n";
+                stations[ksId].setWorkshopWorking(stations[ksId].getWorkshopWorking() - num);
+                logger.log("Station " + to_string(ksId) + ": " + to_string(num) + " workshops put out of operation");
+                cout << num << " workshops put out of operation. Total working: " << stations[ksId].getWorkshopWorking() << "\n";
             }
             cout << "\n";
             break;
 
         case 6:
-            if (t.name.empty() && k.name.empty()) {
+            searchObjects();
+            cout << "\n";
+            break;
+
+        case 7:
+            batchEditPipes();
+            cout << "\n";
+            break;
+
+        case 8:
+            if (pipes.empty() && stations.empty()) {
+                logger.log("No data to save");
                 cout << "No data to save. Please add pipes or compressor stations first.\n\n";
                 break;
             }
 
             cout << "Enter filename to save: ";
             cin >> filename;
-            saveToFile(t, k, filename);
+            saveToFile(filename);
             cout << "\n";
             break;
 
-        case 7:
+        case 9:
             cout << "Enter filename to load: ";
             cin >> filename;
-            loadFromFile(t, k, filename);
+            loadFromFile(filename);
             cout << "\n";
             break;
 
         default:
+            logger.log("Invalid option selected: " + to_string(option));
             cout << "Invalid option. Please try again.\n\n";
             break;
         }
@@ -261,6 +648,8 @@ void Menu() {
 }
 
 int main() {
+    logger.log("Program started");
     Menu();
+    logger.log("Program ended");
     return 0;
 }
