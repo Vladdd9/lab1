@@ -130,11 +130,13 @@
     <ClCompile Include="KS.cpp" />
     <ClCompile Include="lab1.cpp" />
     <ClCompile Include="Logger.cpp" />
+    <ClCompile Include="Network.cpp" />
     <ClCompile Include="Pipe.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="KS.h" />
     <ClInclude Include="Logger.h" />
+    <ClInclude Include="Network.h" />
     <ClInclude Include="Pipe.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

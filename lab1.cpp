@@ -1,6 +1,4 @@
-﻿
-
-#include <iostream>
+﻿#include <iostream>
 #include <string>
 #include <fstream>
 #include <unordered_map>
@@ -10,6 +8,7 @@
 #include "Pipe.h"
 #include "KS.h"
 #include "Logger.h"
+#include "Network.h"
 
 using namespace std;
 
@@ -18,6 +17,22 @@ unordered_map<int, KS> stations;
 int nextPipeId = 1;
 int nextKSId = 1;
 Logger logger;
+GasNetwork gasNetwork;
+
+// Прототипы функций
+void saveToFile(const string& filename);
+void loadFromFile(const string& filename);
+void displayAllPipes();
+void displayAllStations();
+vector<int> findPipesByName(const string& name);
+vector<int> findPipesByRepairStatus(bool inRepair);
+vector<int> findStationsByName(const string& name);
+vector<int> findStationsByPercentNotWorking(double minPercent, double maxPercent = 100.0);
+void batchEditPipes();
+void searchObjects();
+void connectObjects();
+void topologicalSortNetwork();
+void Menu();
 
 void saveToFile(const string& filename) {
     ofstream file(filename);
@@ -45,6 +60,20 @@ void saveToFile(const string& filename) {
             file << k.getType() << endl;
         }
 
+        // Сохраняем сеть
+        file << "Network:" << endl;
+        const auto& adjList = gasNetwork.getAdjacencyList();
+        file << adjList.size() << endl;
+        for (const auto& pair : adjList) {
+            file << pair.first << endl; // start KS
+            file << pair.second.size() << endl; // number of edges
+            for (const auto& edge : pair.second) {
+                file << edge.pipeId << endl;
+                file << edge.endKS << endl;
+                file << edge.diameter << endl;
+            }
+        }
+
         file.close();
         string msg = "Data saved to " + filename + " successfully!";
         logger.log(msg);
@@ -59,6 +88,7 @@ void loadFromFile(const string& filename) {
     if (file.is_open()) {
         pipes.clear();
         stations.clear();
+        gasNetwork.clear();
         string line;
         int count;
 
@@ -117,6 +147,35 @@ void loadFromFile(const string& filename) {
 
             if (id >= nextKSId) {
                 nextKSId = id + 1;
+            }
+        }
+
+        // Загружаем сеть
+        getline(file, line);
+        if (line == "Network:") {
+            file >> count;
+            file.ignore();
+
+            for (int i = 0; i < count; i++) {
+                int startKS;
+                file >> startKS;
+                file.ignore();
+
+                int edgeCount;
+                file >> edgeCount;
+                file.ignore();
+
+                for (int j = 0; j < edgeCount; j++) {
+                    int pipeId, endKS, diameter;
+                    file >> pipeId;
+                    file.ignore();
+                    file >> endKS;
+                    file.ignore();
+                    file >> diameter;
+                    file.ignore();
+
+                    gasNetwork.addConnection(pipeId, startKS, endKS, diameter);
+                }
             }
         }
 
@@ -183,7 +242,7 @@ vector<int> findStationsByName(const string& name) {
     return result;
 }
 
-vector<int> findStationsByPercentNotWorking(double minPercent, double maxPercent = 100.0) {
+vector<int> findStationsByPercentNotWorking(double minPercent, double maxPercent) {
     vector<int> result;
     for (const auto& pair : stations) {
         double percent = pair.second.getPercentNotWorking();
@@ -410,6 +469,141 @@ void searchObjects() {
     }
 }
 
+void connectObjects() {
+    if (stations.size() < 2) {
+        logger.log("Need at least 2 compressor stations to create connection");
+        cout << "Need at least 2 compressor stations to create connection.\n";
+        return;
+    }
+
+    cout << "Available compressor stations:\n";
+    displayAllStations();
+
+    int startKS, endKS;
+    cout << "Enter start KS ID: ";
+    while (!(cin >> startKS) || stations.find(startKS) == stations.end()) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid ID. Please enter a valid KS ID: ";
+    }
+
+    cout << "Enter end KS ID: ";
+    while (!(cin >> endKS) || stations.find(endKS) == stations.end() || endKS == startKS) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid ID. Please enter a valid KS ID different from start: ";
+    }
+
+    if (gasNetwork.hasConnection(startKS, endKS)) {
+        logger.log("Connection already exists between KS " + to_string(startKS) + " and KS " + to_string(endKS));
+        cout << "Connection already exists between these stations.\n";
+        return;
+    }
+
+    // Доступные диаметры
+    vector<int> availableDiameters = { 500, 700, 1000, 1400 };
+    cout << "Available diameters: ";
+    for (size_t i = 0; i < availableDiameters.size(); ++i) {
+        cout << availableDiameters[i];
+        if (i < availableDiameters.size() - 1) cout << ", ";
+    }
+    cout << "\nEnter pipe diameter: ";
+
+    int diameter;
+    while (!(cin >> diameter)) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid input. Please enter a number: ";
+    }
+
+    bool validDiameter = false;
+    for (int diam : availableDiameters) {
+        if (diam == diameter) {
+            validDiameter = true;
+            break;
+        }
+    }
+
+    if (!validDiameter) {
+        cout << "Invalid diameter. Please choose from available diameters.\n";
+        return;
+    }
+
+    // Поиск свободной трубы с нужным диаметром
+    int selectedPipeId = -1;
+    for (const auto& pair : pipes) {
+        const Pipe& pipe = pair.second;
+        if (pipe.getDiameter() == diameter && !gasNetwork.isPipeUsed(pipe.getId())) {
+            selectedPipeId = pipe.getId();
+            break;
+        }
+    }
+
+    if (selectedPipeId == -1) {
+        cout << "No available pipe with diameter " << diameter << "mm found.\n";
+        cout << "Would you like to create a new pipe? (y/n): ";
+        char answer;
+        cin >> answer;
+
+        if (answer == 'y' || answer == 'Y') {
+            string name;
+            float length;
+
+            cout << "Enter pipe name: ";
+            cin >> name;
+
+            cout << "Enter pipe length: ";
+            while (!(cin >> length) || length <= 0) {
+                cin.clear();
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "Invalid input. Please enter a positive number: ";
+            }
+
+            Pipe newPipe(nextPipeId++, name, length, diameter);
+            pipes[newPipe.getId()] = newPipe;
+            selectedPipeId = newPipe.getId();
+
+            string msg = "New pipe created with ID: " + to_string(newPipe.getId());
+            logger.log(msg);
+            cout << msg << "\n";
+        }
+        else {
+            logger.log("Connection creation cancelled - no available pipe");
+            cout << "Connection creation cancelled.\n";
+            return;
+        }
+    }
+
+    // Создаем соединение
+    gasNetwork.addConnection(selectedPipeId, startKS, endKS, diameter);
+
+    string msg = "Connected KS " + to_string(startKS) + " to KS " + to_string(endKS) +
+        " using pipe " + to_string(selectedPipeId) + " (Diameter: " + to_string(diameter) + "mm)";
+    logger.log(msg);
+    cout << "Connection created successfully!\n";
+}
+
+void topologicalSortNetwork() {
+    vector<int> sorted = gasNetwork.topologicalSort();
+
+    if (sorted.empty()) {
+        logger.log("Topological sort failed - network contains cycles");
+        cout << "The gas network contains cycles. Topological sort is not possible.\n";
+    }
+    else {
+        cout << "Topological order of compressor stations:\n";
+        for (size_t i = 0; i < sorted.size(); ++i) {
+            cout << (i + 1) << ". KS " << sorted[i];
+            auto it = stations.find(sorted[i]);
+            if (it != stations.end()) {
+                cout << " (" << it->second.getName() << ")";
+            }
+            cout << "\n";
+        }
+        logger.log("Topological sort completed successfully");
+    }
+}
+
 void Menu() {
     int option;
     string filename;
@@ -425,6 +619,9 @@ void Menu() {
         cout << "7 - batch edit pipes \n";
         cout << "8 - save \n";
         cout << "9 - load \n";
+        cout << "10 - connect objects \n";
+        cout << "11 - display network \n";
+        cout << "12 - topological sort \n";
         cout << "0 - exit \n";
 
         while (!(cin >> option)) {
@@ -636,6 +833,21 @@ void Menu() {
             cout << "Enter filename to load: ";
             cin >> filename;
             loadFromFile(filename);
+            cout << "\n";
+            break;
+
+        case 10:
+            connectObjects();
+            cout << "\n";
+            break;
+
+        case 11:
+            gasNetwork.displayNetwork();
+            cout << "\n";
+            break;
+
+        case 12:
+            topologicalSortNetwork();
             cout << "\n";
             break;
 
