@@ -3,6 +3,7 @@
 
 #include <string>
 #include <iostream>
+#include <vector>
 
 class Pipe {
 private:
@@ -14,6 +15,8 @@ private:
     std::string condition;
 
 public:
+    static const std::vector<int> VALID_DIAMETERS;
+
     Pipe();
     Pipe(int id, const std::string& name, float length, int diameter);
 
@@ -29,6 +32,11 @@ public:
     void setDiameter(int newDiameter);
     void setRepair(bool inRepair);
     void setCondition(const std::string& newCondition);
+
+    // Новые методы для расчета производительности и веса
+    double calculateCapacity() const;
+    double calculateWeight() const;
+    static bool isValidDiameter(int diameter);
 
     friend std::ostream& operator<<(std::ostream& os, const Pipe& pipe);
 };

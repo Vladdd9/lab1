@@ -32,6 +32,8 @@ void batchEditPipes();
 void searchObjects();
 void connectObjects();
 void topologicalSortNetwork();
+void calculateMaxFlow();
+void findShortestPath();
 void Menu();
 
 void saveToFile(const string& filename) {
@@ -197,6 +199,9 @@ void displayAllPipes() {
     cout << "Pipes:\n";
     for (const auto& pair : pipes) {
         cout << pair.second << "\n";
+        // Показываем также производительность и вес
+        cout << "  Capacity: " << pair.second.calculateCapacity()
+            << " units, Weight: " << pair.second.calculateWeight() << " km\n";
     }
 }
 
@@ -500,33 +505,24 @@ void connectObjects() {
         return;
     }
 
-    // Доступные диаметры
-    vector<int> availableDiameters = { 500, 700, 1000, 1400 };
+    // Доступные диаметры из Pipe::VALID_DIAMETERS
     cout << "Available diameters: ";
-    for (size_t i = 0; i < availableDiameters.size(); ++i) {
-        cout << availableDiameters[i];
-        if (i < availableDiameters.size() - 1) cout << ", ";
+    for (size_t i = 0; i < Pipe::VALID_DIAMETERS.size(); ++i) {
+        cout << Pipe::VALID_DIAMETERS[i];
+        if (i < Pipe::VALID_DIAMETERS.size() - 1) cout << ", ";
     }
     cout << "\nEnter pipe diameter: ";
 
     int diameter;
-    while (!(cin >> diameter)) {
+    while (!(cin >> diameter) || !Pipe::isValidDiameter(diameter)) {
         cin.clear();
         cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        cout << "Invalid input. Please enter a number: ";
-    }
-
-    bool validDiameter = false;
-    for (int diam : availableDiameters) {
-        if (diam == diameter) {
-            validDiameter = true;
-            break;
+        cout << "Invalid diameter. Please choose from available diameters: ";
+        for (size_t i = 0; i < Pipe::VALID_DIAMETERS.size(); ++i) {
+            cout << Pipe::VALID_DIAMETERS[i];
+            if (i < Pipe::VALID_DIAMETERS.size() - 1) cout << ", ";
         }
-    }
-
-    if (!validDiameter) {
-        cout << "Invalid diameter. Please choose from available diameters.\n";
-        return;
+        cout << ": ";
     }
 
     // Поиск свободной трубы с нужным диаметром
@@ -552,7 +548,7 @@ void connectObjects() {
             cout << "Enter pipe name: ";
             cin >> name;
 
-            cout << "Enter pipe length: ";
+            cout << "Enter pipe length (in meters, positive number): ";
             while (!(cin >> length) || length <= 0) {
                 cin.clear();
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
@@ -604,25 +600,160 @@ void topologicalSortNetwork() {
     }
 }
 
+void calculateMaxFlow() {
+    if (stations.size() < 2) {
+        logger.log("Need at least 2 compressor stations to calculate flow");
+        cout << "Need at least 2 compressor stations to calculate flow.\n";
+        return;
+    }
+
+    if (pipes.empty()) {
+        logger.log("Need pipes to calculate flow");
+        cout << "Need pipes to calculate flow.\n";
+        return;
+    }
+
+    displayAllStations();
+
+    int sourceKS, sinkKS;
+    cout << "Enter source KS ID: ";
+    while (!(cin >> sourceKS) || stations.find(sourceKS) == stations.end()) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid ID. Please enter a valid KS ID: ";
+    }
+
+    cout << "Enter sink KS ID: ";
+    while (!(cin >> sinkKS) || stations.find(sinkKS) == stations.end() || sinkKS == sourceKS) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid ID. Please enter a valid KS ID different from source: ";
+    }
+
+    double maxFlow = gasNetwork.calculateMaxFlow(sourceKS, sinkKS, pipes);
+
+    string msg = "Maximum flow from KS " + to_string(sourceKS) +
+        " to KS " + to_string(sinkKS) + ": " + to_string(maxFlow) + " units";
+    logger.log(msg);
+    cout << msg << "\n";
+}
+
+void findShortestPath() {
+    if (stations.size() < 2) {
+        logger.log("Need at least 2 compressor stations to find path");
+        cout << "Need at least 2 compressor stations to find path.\n";
+        return;
+    }
+
+    if (pipes.empty()) {
+        logger.log("Need pipes to find path");
+        cout << "Need pipes to find path.\n";
+        return;
+    }
+
+    displayAllStations();
+
+    int startKS, endKS;
+    cout << "Enter start KS ID: ";
+    while (!(cin >> startKS) || stations.find(startKS) == stations.end()) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid ID. Please enter a valid KS ID: ";
+    }
+
+    cout << "Enter end KS ID: ";
+    while (!(cin >> endKS) || stations.find(endKS) == stations.end() || endKS == startKS) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Invalid ID. Please enter a valid KS ID different from start: ";
+    }
+
+    auto result = gasNetwork.findShortestPath(startKS, endKS, pipes);
+    double distance = result.first;
+    const vector<int>& path = result.second;
+
+    if (distance == numeric_limits<double>::infinity()) {
+        string msg = "No path found from KS " + to_string(startKS) +
+            " to KS " + to_string(endKS);
+        logger.log(msg);
+        cout << msg << "\n";
+        cout << "Possible reasons:\n";
+        cout << "1. No connection exists between these stations\n";
+        cout << "2. All pipes on the path are in repair\n";
+    }
+    else {
+        cout << "Shortest path distance: " << distance << " km\n";
+        cout << "Path: ";
+        for (size_t i = 0; i < path.size(); ++i) {
+            cout << "KS " << path[i];
+            auto it = stations.find(path[i]);
+            if (it != stations.end()) {
+                cout << " (" << it->second.getName() << ")";
+            }
+            if (i < path.size() - 1) {
+                cout << " -> ";
+            }
+        }
+        cout << "\n";
+
+        // Показываем детали пути (трубы)
+        cout << "Path details:\n";
+        for (size_t i = 0; i < path.size() - 1; ++i) {
+            int from = path[i];
+            int to = path[i + 1];
+
+            // Находим трубу между этими станциями
+            const auto& adjList = gasNetwork.getAdjacencyList();
+            auto it_from = adjList.find(from);
+            if (it_from != adjList.end()) {
+                for (const auto& edge : it_from->second) {
+                    if (edge.endKS == to) {
+                        auto pipeIt = pipes.find(edge.pipeId);
+                        if (pipeIt != pipes.end()) {
+                            cout << "  Pipe " << edge.pipeId << " from KS " << from
+                                << " to KS " << to << ": " << pipeIt->second.getLength()
+                                << "m, Diameter: " << edge.diameter << "mm, "
+                                << "Weight: " << pipeIt->second.calculateWeight() << "km\n";
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        string msg = "Found path from KS " + to_string(startKS) +
+            " to KS " + to_string(endKS) + " with distance " +
+            to_string(distance) + " km";
+        logger.log(msg);
+    }
+}
+
 void Menu() {
     int option;
     string filename;
 
     while (true) {
+        cout << "\n========================================\n";
+        cout << "Gas Transport Network Management System\n";
+        cout << "========================================\n";
         cout << "Choose an option: \n";
-        cout << "1 - add pipe \n";
-        cout << "2 - add a compressor station \n";
-        cout << "3 - view all objects \n";
-        cout << "4 - edit pipe \n";
-        cout << "5 - edit compressor station \n";
-        cout << "6 - search objects \n";
-        cout << "7 - batch edit pipes \n";
-        cout << "8 - save \n";
-        cout << "9 - load \n";
-        cout << "10 - connect objects \n";
-        cout << "11 - display network \n";
-        cout << "12 - topological sort \n";
-        cout << "0 - exit \n";
+        cout << "1 - Add pipe \n";
+        cout << "2 - Add a compressor station \n";
+        cout << "3 - View all objects \n";
+        cout << "4 - Edit pipe \n";
+        cout << "5 - Edit compressor station \n";
+        cout << "6 - Search objects \n";
+        cout << "7 - Batch edit pipes \n";
+        cout << "8 - Save to file \n";
+        cout << "9 - Load from file \n";
+        cout << "10 - Connect objects (create network) \n";
+        cout << "11 - Display network \n";
+        cout << "12 - Topological sort \n";
+        cout << "13 - Calculate maximum flow \n";
+        cout << "14 - Find shortest path \n";
+        cout << "0 - Exit \n";
+        cout << "========================================\n";
+        cout << "Your choice: ";
 
         while (!(cin >> option)) {
             cin.clear();
@@ -647,24 +778,35 @@ void Menu() {
             cout << "Insert pipe name: ";
             cin >> name;
 
-            cout << "Insert length: ";
+            cout << "Insert length (in meters): ";
             while (!(cin >> length) || length <= 0) {
                 cin.clear();
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
                 cout << "Invalid input. Please enter a positive number: ";
             }
 
-            cout << "Insert diameter: ";
-            while (!(cin >> diameter) || diameter <= 0) {
+            cout << "Available diameters: ";
+            for (size_t i = 0; i < Pipe::VALID_DIAMETERS.size(); ++i) {
+                cout << Pipe::VALID_DIAMETERS[i] << "mm";
+                if (i < Pipe::VALID_DIAMETERS.size() - 1) cout << ", ";
+            }
+            cout << "\nInsert diameter: ";
+            while (!(cin >> diameter) || !Pipe::isValidDiameter(diameter)) {
                 cin.clear();
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
-                cout << "Invalid input. Please enter a positive integer: ";
+                cout << "Invalid diameter. Please choose from: ";
+                for (size_t i = 0; i < Pipe::VALID_DIAMETERS.size(); ++i) {
+                    cout << Pipe::VALID_DIAMETERS[i];
+                    if (i < Pipe::VALID_DIAMETERS.size() - 1) cout << ", ";
+                }
+                cout << ": ";
             }
 
             Pipe t(nextPipeId++, name, length, diameter);
             pipes[t.getId()] = t;
 
-            string msg = "Pipe added with ID: " + to_string(t.getId());
+            string msg = "Pipe added with ID: " + to_string(t.getId()) +
+                ", Capacity: " + to_string(t.calculateCapacity()) + " units";
             logger.log(msg);
             cout << msg << "\n\n";
             break;
@@ -735,20 +877,22 @@ void Menu() {
             cout << "Is pipe in repair? (y/n): ";
             char ans;
             cin >> ans;
-            while (ans != 'y' && ans != 'n') {
+            while (ans != 'y' && ans != 'n' && ans != 'Y' && ans != 'N') {
                 cout << "Type y or n: ";
                 cin >> ans;
             }
 
-            if (ans == 'y') {
+            if (ans == 'y' || ans == 'Y') {
                 pipes[pipeId].setRepair(true);
                 logger.log("Pipe " + to_string(pipeId) + " marked as in repair");
                 cout << "Pipe marked as in repair.\n";
+                cout << "New capacity: " << pipes[pipeId].calculateCapacity() << " units\n";
             }
             else {
                 pipes[pipeId].setRepair(false);
                 logger.log("Pipe " + to_string(pipeId) + " marked as working");
                 cout << "Pipe marked as working.\n";
+                cout << "New capacity: " << pipes[pipeId].calculateCapacity() << " units\n";
             }
             cout << "\n";
             break;
@@ -848,6 +992,16 @@ void Menu() {
 
         case 12:
             topologicalSortNetwork();
+            cout << "\n";
+            break;
+
+        case 13:
+            calculateMaxFlow();
+            cout << "\n";
+            break;
+
+        case 14:
+            findShortestPath();
             cout << "\n";
             break;
 
